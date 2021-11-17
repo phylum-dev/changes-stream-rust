@@ -2,7 +2,7 @@
 //! futures::Stream of CouchDB changes stream events.
 
 use bytes::Bytes;
-use futures_util::stream::Stream;
+use futures_util::stream::{Stream, StreamExt};
 use log::error;
 use std::{pin::Pin, task::Poll};
 
@@ -17,6 +17,8 @@ pub struct ChangesStream {
     buffer: Vec<u8>,
     /// Source of http chunks provided by reqwest
     source: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
+    /// Window start when checking the stream for delimiters
+    window_start: usize,
 }
 
 impl ChangesStream {
@@ -51,11 +53,12 @@ impl ChangesStream {
         if !status.is_success() {
             return Err(Error::InvalidStatus(status));
         }
-        let source = Pin::new(Box::new(res.bytes_stream()));
+        let source = Pin::new(Box::new(res.bytes_stream().fuse()));
 
         Ok(ChangesStream {
             buffer: vec![],
             source,
+            window_start: 0,
         })
     }
 }
@@ -67,15 +70,26 @@ impl Stream for ChangesStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        log::debug!("Polling...");
         loop {
-            let line_break_pos = self
-                .buffer
+            log::debug!("window_start: {}", self.window_start);
+
+            let line_break_pos = self.buffer[self.window_start..]
                 .iter()
                 .enumerate()
                 .find(|(_pos, b)| **b == 0x0A) // search for \n
-                .map(|(pos, _b)| pos);
+                .map(|(pos, _b)| pos + self.window_start);
+
             if let Some(line_break_pos) = line_break_pos {
+                log::debug!("saw line ending at position: {}", line_break_pos);
                 let mut line = self.buffer.drain(0..=line_break_pos).collect::<Vec<_>>();
+                log::debug!(
+                    "buf len: {}, line_break_pos: {}, drained: {}",
+                    self.buffer.len(),
+                    line_break_pos,
+                    line.len()
+                );
+                self.window_start = 0;
 
                 if line.len() < 15 {
                     // skip prologue, epilogue and empty lines (continuous mode)
@@ -107,7 +121,10 @@ impl Stream for ChangesStream {
                 match Stream::poll_next(self.source.as_mut(), cx) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(None) => return Poll::Ready(None),
-                    Poll::Ready(Some(Ok(chunk))) => self.buffer.append(&mut chunk.to_vec()),
+                    Poll::Ready(Some(Ok(chunk))) => {
+                        self.window_start = self.buffer.len();
+                        self.buffer.append(&mut chunk.to_vec());
+                    }
                     Poll::Ready(Some(Err(err))) => {
                         error!("Error getting next chunk: {:?}", err);
                         return Poll::Ready(None);
