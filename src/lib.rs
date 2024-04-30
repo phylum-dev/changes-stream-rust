@@ -1,10 +1,10 @@
 //! The `changes-stream` crate is designed to give you a
 //! futures::Stream of CouchDB changes stream events.
 
-use bytes::Bytes;
+use bytes::{buf::IntoIter, Bytes};
 use futures_util::stream::Stream;
 use log::error;
-use std::{pin::Pin, task::Poll};
+use std::{mem::replace, pin::Pin, task::Poll};
 
 mod error;
 mod event;
@@ -13,12 +13,10 @@ pub use event::{Change, ChangeEvent, Event, FinishedEvent};
 
 /// A structure which implements futures::Stream
 pub struct ChangesStream {
-    /// for incomplete line chunks
-    buffer: Vec<u8>,
     /// Source of http chunks provided by reqwest
     source: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
-    /// Search pos for newline
-    newline_search_pos: usize,
+    /// Buffer of current line and current chunk iterator
+    buf: (Vec<u8>, Option<IntoIter<Bytes>>),
 }
 
 impl ChangesStream {
@@ -56,9 +54,8 @@ impl ChangesStream {
         let source = Pin::new(Box::new(res.bytes_stream()));
 
         Ok(ChangesStream {
-            buffer: vec![],
             source,
-            newline_search_pos: 0,
+            buf: (Vec::new(), None),
         })
     }
 }
@@ -70,48 +67,56 @@ impl Stream for ChangesStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        loop {
-            let line_break_pos = self
-                .buffer
-                .iter()
-                .skip(self.newline_search_pos)
-                .position(|b| *b == 0x0A)
-                .map(|pos| self.newline_search_pos + pos);
-            if let Some(line_break_pos) = line_break_pos {
-                let mut line = self.buffer.drain(0..=line_break_pos).collect::<Vec<_>>();
-                self.newline_search_pos = 0;
-
-                if line.len() < 15 {
-                    // skip prologue, epilogue and empty lines (continuous mode)
-                    continue;
-                }
-                line.pop(); // remove \n
-                if line.last() == Some(&0x0D) {
-                    // 0x0D is '\r'. CouchDB >= 2.0 sends "\r\n"
-                    line.pop();
-                }
-                if line.last() == Some(&0x2C) {
-                    // 0x2C is ','
-                    line.pop(); // remove ,
-                }
-
-                let result = serde_json::from_slice(line.as_slice()).map_err(|err| {
-                    Error::ParsingFailed(err, String::from_utf8(line).unwrap_or_default())
-                });
-
-                return Poll::Ready(Some(result));
-            } else {
-                self.newline_search_pos = self.buffer.len();
-
+        'main: loop {
+            if self.buf.1.is_none() {
                 match Stream::poll_next(self.source.as_mut(), cx) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(None) => return Poll::Ready(None),
-                    Poll::Ready(Some(Ok(chunk))) => self.buffer.append(&mut chunk.to_vec()),
+                    Poll::Ready(Some(Ok(chunk))) => self.buf.1 = Some(chunk.into_iter()),
                     Poll::Ready(Some(Err(err))) => {
                         error!("Error getting next chunk: {:?}", err);
                         return Poll::Ready(None);
                     }
-                };
+                }
+            } else {
+                let (line, chunk_iter) = &mut self.buf;
+                let iter = chunk_iter.as_mut().unwrap();
+
+                loop {
+                    if let Some(byte) = iter.next() {
+                        if byte == 0x0A {
+                            // Found '\n', end of line
+                            break;
+                        }
+                        line.push(byte);
+                    } else {
+                        // We need another chunk to fill the line
+                        *chunk_iter = None;
+                        continue 'main;
+                    }
+                }
+
+                let line = replace(line, Vec::with_capacity(line.len() * 2));
+                if line.len() < 14 {
+                    // skip prologue, epilogue and empty lines (continuous mode)
+                    continue;
+                }
+
+                let mut len = line.len();
+                if line[len - 1] == 0x0D {
+                    // 0x0D is '\r'. CouchDB >= 2.0 sends "\r\n"
+                    len -= 1;
+                }
+                if line[len - 1] == 0x2C {
+                    // 0x2C is ','
+                    len -= 1;
+                }
+
+                let result = serde_json::from_slice(&line[..len]).map_err(|err| {
+                    Error::ParsingFailed(err, String::from_utf8(line).unwrap_or_default())
+                });
+
+                return Poll::Ready(Some(result));
             }
         }
     }
