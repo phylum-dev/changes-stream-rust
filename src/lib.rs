@@ -75,9 +75,8 @@ impl Stream for ChangesStream {
                 .buffer
                 .iter()
                 .skip(self.newline_search_pos)
-                .enumerate()
-                .find(|(_pos, b)| **b == 0x0A) // search for \n
-                .map(|(pos, _b)| self.newline_search_pos + pos);
+                .position(|b| *b == 0x0A)
+                .map(|pos| self.newline_search_pos + pos);
             if let Some(line_break_pos) = line_break_pos {
                 let mut line = self.buffer.drain(0..=line_break_pos).collect::<Vec<_>>();
                 self.newline_search_pos = 0;
@@ -86,26 +85,19 @@ impl Stream for ChangesStream {
                     // skip prologue, epilogue and empty lines (continuous mode)
                     continue;
                 }
-                line.remove(line.len() - 1); // remove \n
-                if line[line.len() - 1] == 0x0D {
+                line.pop(); // remove \n
+                if line.last() == Some(&0x0D) {
                     // 0x0D is '\r'. CouchDB >= 2.0 sends "\r\n"
-                    line.remove(line.len() - 1);
+                    line.pop();
                 }
-                if line[line.len() - 1] == 0x2C {
+                if line.last() == Some(&0x2C) {
                     // 0x2C is ','
-                    line.remove(line.len() - 1); // remove ,
+                    line.pop(); // remove ,
                 }
 
-                let result = match serde_json::from_slice(line.as_slice()) {
-                    Err(err) => Err(Error::ParsingFailed(
-                        err,
-                        String::from_utf8(line).unwrap_or_default(),
-                    )),
-                    Ok(json) => {
-                        let event: Event = json;
-                        Ok(event)
-                    }
-                };
+                let result = serde_json::from_slice(line.as_slice()).map_err(|err| {
+                    Error::ParsingFailed(err, String::from_utf8(line).unwrap_or_default())
+                });
 
                 return Poll::Ready(Some(result));
             } else {
