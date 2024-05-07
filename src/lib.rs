@@ -13,6 +13,12 @@ pub use event::{Change, ChangeEvent, Event, FinishedEvent};
 
 /// A structure which implements futures::Stream
 pub struct ChangesStream {
+    /// metrics bytes counter
+    #[cfg(feature = "metrics")]
+    bytes: metrics::Counter,
+    /// metrics entries counter
+    #[cfg(feature = "metrics")]
+    entries: metrics::Counter,
     /// Source of http chunks provided by reqwest
     source: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
     /// Buffer of current line and current chunk iterator
@@ -45,15 +51,49 @@ impl ChangesStream {
     /// #     }
     /// # }
     /// ```
-    pub async fn new(db: String) -> Result<ChangesStream, Error> {
-        let res = reqwest::get(&db).await.map_err(Error::RequestFailed)?;
+    pub async fn new(db: String) -> Result<Self, Error> {
+        let url = url::Url::parse(&db).map_err(Error::InvalidUrl)?;
+        #[cfg(feature = "metrics")]
+        let metrics_prefix = regex::Regex::new(r"(?m)[_/]+")
+            .unwrap()
+            .replace_all(
+                &format!("{}_{}", url.host_str().unwrap_or_default(), url.path()),
+                "_",
+            )
+            .to_string();
+
+        let res = reqwest::get(url).await.map_err(Error::RequestFailed)?;
         let status = res.status();
         if !status.is_success() {
             return Err(Error::InvalidStatus(status));
         }
         let source = Pin::new(Box::new(res.bytes_stream()));
 
-        Ok(ChangesStream {
+        #[cfg(feature = "metrics")]
+        let (bytes, entries) = {
+            let bytes_name = format!("{}_bytes", metrics_prefix);
+            let entries_name = format!("{}_entries", metrics_prefix);
+            metrics::describe_counter!(
+                bytes_name.clone(),
+                metrics::Unit::Bytes,
+                "Changes stream bytes"
+            );
+            metrics::describe_counter!(
+                entries_name.clone(),
+                metrics::Unit::Count,
+                "Changes stream entries"
+            );
+            (
+                metrics::counter!(bytes_name),
+                metrics::counter!(entries_name),
+            )
+        };
+
+        Ok(Self {
+            #[cfg(feature = "metrics")]
+            bytes,
+            #[cfg(feature = "metrics")]
+            entries,
             source,
             buf: (Vec::new(), None),
         })
@@ -72,7 +112,12 @@ impl Stream for ChangesStream {
                 match Stream::poll_next(self.source.as_mut(), cx) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(None) => return Poll::Ready(None),
-                    Poll::Ready(Some(Ok(chunk))) => self.buf.1 = Some(chunk.into_iter()),
+                    Poll::Ready(Some(Ok(chunk))) => {
+                        #[cfg(feature = "metrics")]
+                        self.bytes.increment(chunk.len() as u64);
+
+                        self.buf.1 = Some(chunk.into_iter())
+                    }
                     Poll::Ready(Some(Err(err))) => {
                         error!("Error getting next chunk: {:?}", err);
                         return Poll::Ready(None);
@@ -115,6 +160,9 @@ impl Stream for ChangesStream {
                 let result = serde_json::from_slice(&line[..len]).map_err(|err| {
                     Error::ParsingFailed(err, String::from_utf8(line).unwrap_or_default())
                 });
+
+                #[cfg(feature = "metrics")]
+                self.entries.increment(1);
 
                 return Poll::Ready(Some(result));
             }
