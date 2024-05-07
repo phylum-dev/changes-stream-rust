@@ -1,5 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
@@ -18,7 +18,10 @@ pub struct ChangeEvent {
     pub deleted: bool,
 
     #[serde(default)]
-    pub doc: Option<Map<String, Value>>,
+    #[cfg(feature = "raw_value_doc")]
+    pub doc: Option<Box<serde_json::value::RawValue>>,
+    #[cfg(not(feature = "raw_value_doc"))]
+    pub doc: Option<serde_json::Map<String, Value>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
