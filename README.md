@@ -42,3 +42,23 @@ async fn main() {
     }
 }
 ```
+
+## features
+
+### metrics
+
+Enables metric collection of the changes stream as counter values. The common prefix is generated from the host and path of the url. The metrics are:
+ * `{prefix}_bytes`: Total bytes read from the changes stream
+ * `{prefix}_entries`: Total parsed change entries
+
+### raw_value_doc
+
+Changes the type of ChangeEvent::Doc from `serde_json::Map<String, serde_json::Value>` to `serde_json::value::RawValue`.
+
+### native-tls
+
+Use the native-tls crate for TLS connections. This is the default.
+
+### rustls-tls
+
+Use the rustls crate for TLS connections.
