@@ -157,9 +157,18 @@ impl Stream for ChangesStream {
                     len -= 1;
                 }
 
-                let result = serde_json::from_slice(&line[..len]).map_err(|err| {
-                    Error::ParsingFailed(err, String::from_utf8(line).unwrap_or_default())
-                });
+                let result = serde_json::from_slice::<ChangeEvent>(&line[..len])
+                    .map(Event::Change)
+                    .or_else(|err| {
+                        serde_json::from_slice::<FinishedEvent>(&line[..len])
+                            .map(Event::Finished)
+                            .map_err(|_err| {
+                                Error::ParsingFailed(
+                                    err,
+                                    String::from_utf8(line).unwrap_or_default(),
+                                )
+                            })
+                    });
 
                 #[cfg(feature = "metrics")]
                 self.entries.increment(1);
