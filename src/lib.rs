@@ -52,7 +52,7 @@ impl ChangesStream {
     /// # }
     /// ```
     pub async fn new(db: String) -> Result<Self, Error> {
-        let url = url::Url::parse(&db).map_err(Error::InvalidUrl)?;
+        let url = url::Url::parse(&db)?;
         #[cfg(feature = "metrics")]
         let metrics_prefix = regex::Regex::new(r"(?m)[_/]+")
             .unwrap()
@@ -62,7 +62,7 @@ impl ChangesStream {
             )
             .to_string();
 
-        let res = reqwest::get(url).await.map_err(Error::RequestFailed)?;
+        let res = reqwest::get(url).await?;
         let status = res.status();
         if !status.is_success() {
             return Err(Error::InvalidStatus(status));
@@ -159,14 +159,12 @@ impl Stream for ChangesStream {
 
                 let result = serde_json::from_slice::<ChangeEvent>(&line[..len])
                     .map(Event::Change)
-                    .or_else(|err| {
+                    .or_else(|error| {
                         serde_json::from_slice::<FinishedEvent>(&line[..len])
                             .map(Event::Finished)
-                            .map_err(|_err| {
-                                Error::ParsingFailed(
-                                    err,
-                                    String::from_utf8(line).unwrap_or_default(),
-                                )
+                            .map_err(|_err| Error::ParsingFailed {
+                                error,
+                                json: String::from_utf8(line).unwrap_or_default(),
                             })
                     });
 

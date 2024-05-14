@@ -1,7 +1,7 @@
 [package]
 name = "changes-stream2"
 description = "couchdb follower"
-version = "0.2.9"
+version = "0.2.10"
 authors = [
     "Ashley Williams <ashley666ashley@gmail.com>",
     "René Rössler <rene@freshx.de>",
@@ -20,6 +20,7 @@ regex = { version = "1", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["stream"] }
 serde = "1"
 serde_derive = "1"
+thiserror = "1"
 tokio = "1"
 url = "2"
 

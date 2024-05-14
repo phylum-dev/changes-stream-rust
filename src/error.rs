@@ -1,7 +1,17 @@
-#[derive(Debug)]
+use thiserror::Error;
+
+#[derive(Error, Debug)]
 pub enum Error {
-    InvalidUrl(url::ParseError),
-    RequestFailed(reqwest::Error),
+    #[error("Could not parse the url")]
+    InvalidUrl(#[from] url::ParseError),
+    #[error("Request failed")]
+    RequestFailed(#[from] reqwest::Error),
+    #[error("Server answered with non-ok status: {0}")]
     InvalidStatus(reqwest::StatusCode),
-    ParsingFailed(serde_json::Error, String),
+    #[error("Could not parse server response: {json}")]
+    ParsingFailed {
+        #[source]
+        error: serde_json::Error,
+        json: String,
+    },
 }

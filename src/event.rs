@@ -7,7 +7,7 @@ pub enum Event {
     Finished(FinishedEvent),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChangeEvent {
     pub seq: Value,
     pub id: String,
@@ -29,7 +29,7 @@ pub struct FinishedEvent {
     pub pending: Option<u64>, // not available on CouchDB 1.0
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Change {
     pub rev: String,
 }
