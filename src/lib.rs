@@ -73,8 +73,8 @@ impl ChangesStream {
 
         #[cfg(feature = "metrics")]
         let (bytes, entries) = {
-            let bytes_name = format!("{}_bytes_total", metrics_prefix);
-            let entries_name = format!("{}_entries_total", metrics_prefix);
+            let bytes_name = format!("couchdb_changes_{}_bytes_total", metrics_prefix);
+            let entries_name = format!("couchdb_changes_{}_entries_total", metrics_prefix);
             metrics::describe_counter!(
                 bytes_name.clone(),
                 metrics::Unit::Bytes,
