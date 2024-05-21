@@ -47,9 +47,9 @@ async fn main() {
 
 ### metrics
 
-Enables metric collection of the changes stream as counter values. The common prefix is generated from the host and path of the url. The metrics are:
- * `{prefix}_bytes`: Total bytes read from the changes stream
- * `{prefix}_entries`: Total parsed change entries
+Enables metrics collection of the changes stream as counter values. The name is generated from the host and path of the url(database name). The metrics are:
+ * `couchdb_changes_{name}_bytes`: Total bytes read from the changes stream
+ * `couchdb_changes_{name}_entries`: Total parsed change entries
 
 ### raw_value_doc
 
