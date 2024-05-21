@@ -4,6 +4,7 @@
 use bytes::{buf::IntoIter, Bytes};
 use futures_util::stream::Stream;
 use log::error;
+use serde_json::Value;
 use std::{mem::replace, pin::Pin, task::Poll};
 
 mod error;
@@ -26,7 +27,7 @@ pub struct ChangesStream {
 }
 
 impl ChangesStream {
-    /// Constructs a new `ChangesStream` struct
+    /// Constructs a new `ChangesStream` struct with a post payload
     ///
     /// Takes a single argument, `db`, which represents the
     /// url of the data you wish to stream.
@@ -40,8 +41,8 @@ impl ChangesStream {
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// #     let url = "https://replicate.npmjs.com/_changes".to_string();
-    /// #     let mut changes = ChangesStream::new(url).await.unwrap();
+    /// #     let url = "https://replicate.npmjs.com/_changes?filter=_selector".to_string();
+    /// #     let mut changes = ChangesStream::with_post_payload(url, &serde_json::json!({"selector": { "_id": { "$regex": "^_design/" }}})).await.unwrap();
     /// #     while let Some(event) = changes.next().await {
     /// #         match event {
     /// #             Ok(Event::Change(change)) => println!("Change ({}): {}", change.seq, change.id),
@@ -51,7 +52,7 @@ impl ChangesStream {
     /// #     }
     /// # }
     /// ```
-    pub async fn new(db: String) -> Result<Self, Error> {
+    pub async fn with_post_payload(db: String, payload: &Value) -> Result<Self, Error> {
         let url = url::Url::parse(&db)?;
         #[cfg(feature = "metrics")]
         let metrics_prefix = regex::Regex::new(r"(?m)[_/]+")
@@ -62,7 +63,8 @@ impl ChangesStream {
             )
             .to_string();
 
-        let res = reqwest::get(url).await?;
+        let client = reqwest::Client::new();
+        let res = client.post(url).json(payload).send().await?;
         let status = res.status();
         if !status.is_success() {
             return Err(Error::InvalidStatus(status));
@@ -97,6 +99,35 @@ impl ChangesStream {
             source,
             buf: (Vec::new(), None),
         })
+    }
+
+    /// Constructs a new `ChangesStream` struct
+    ///
+    /// Takes a single argument, `db`, which represents the
+    /// url of the data you wish to stream.
+    ///
+    /// For example, to create a new `ChangesStream` struct
+    /// for the npmjs registry, you would write:
+    ///
+    /// ```no_run
+    /// # use changes_stream2::{ChangesStream, Event};
+    /// # use futures_util::stream::StreamExt;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #     let url = "https://replicate.npmjs.com/_changes".to_string();
+    /// #     let mut changes = ChangesStream::new(url).await.unwrap();
+    /// #     while let Some(event) = changes.next().await {
+    /// #         match event {
+    /// #             Ok(Event::Change(change)) => println!("Change ({}): {}", change.seq, change.id),
+    /// #             Ok(Event::Finished(finished)) => println!("Finished: {}", finished.last_seq),
+    /// #             Err(err) => println!("Error: {:?}", err),
+    /// #         }
+    /// #     }
+    /// # }
+    /// ```
+    pub async fn new(db: String) -> Result<Self, Error> {
+        Self::with_post_payload(db, &serde_json::json!({})).await
     }
 }
 
