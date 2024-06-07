@@ -55,7 +55,7 @@ impl ChangesStream {
     pub async fn with_post_payload(db: String, payload: &Value) -> Result<Self, Error> {
         let url = url::Url::parse(&db)?;
         #[cfg(feature = "metrics")]
-        let metrics_prefix = regex::Regex::new(r"(?m)[_/]+")
+        let database = regex::Regex::new(r"(?m)[_/]+")
             .unwrap()
             .replace_all(
                 &format!("{}_{}", url.host_str().unwrap_or_default(), url.path()),
@@ -73,21 +73,17 @@ impl ChangesStream {
 
         #[cfg(feature = "metrics")]
         let (bytes, entries) = {
-            let bytes_name = format!("couchdb_changes_{}_bytes_total", metrics_prefix);
-            let entries_name = format!("couchdb_changes_{}_entries_total", metrics_prefix);
+            let bytes_name = "couchdb_changes_bytes_total";
+            let entries_name = "couchdb_changes_entries_total";
+            metrics::describe_counter!(bytes_name, metrics::Unit::Bytes, "Changes stream bytes");
             metrics::describe_counter!(
-                bytes_name.clone(),
-                metrics::Unit::Bytes,
-                "Changes stream bytes"
-            );
-            metrics::describe_counter!(
-                entries_name.clone(),
+                entries_name,
                 metrics::Unit::Count,
                 "Changes stream entries"
             );
             (
-                metrics::counter!(bytes_name),
-                metrics::counter!(entries_name),
+                metrics::counter!(bytes_name, "database" => database),
+                metrics::counter!(entries_name, "database" => database),
             )
         };
 
