@@ -82,7 +82,7 @@ impl ChangesStream {
                 "Changes stream entries"
             );
             (
-                metrics::counter!(bytes_name, "database" => database),
+                metrics::counter!(bytes_name, "database" => database.clone()),
                 metrics::counter!(entries_name, "database" => database),
             )
         };
