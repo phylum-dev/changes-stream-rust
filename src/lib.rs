@@ -67,7 +67,8 @@ impl ChangesStream {
         let res = client.post(url).json(payload).send().await?;
         let status = res.status();
         if !status.is_success() {
-            return Err(Error::InvalidStatus(status));
+            let body = res.text().await.unwrap_or_default();
+            return Err(Error::InvalidResponse { status, body });
         }
         let source = Pin::new(Box::new(res.bytes_stream()));
 

@@ -6,8 +6,11 @@ pub enum Error {
     InvalidUrl(#[from] url::ParseError),
     #[error("Request failed")]
     RequestFailed(#[from] reqwest::Error),
-    #[error("Server answered with non-ok status: {0}")]
-    InvalidStatus(reqwest::StatusCode),
+    #[error("Server answered with non-ok status: {status}")]
+    InvalidResponse {
+        status: reqwest::StatusCode,
+        body: String,
+    },
     #[error("Could not parse server response: {json}")]
     ParsingFailed {
         #[source]
