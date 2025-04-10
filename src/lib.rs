@@ -64,7 +64,17 @@ impl ChangesStream {
             .to_string();
 
         let client = reqwest::Client::new();
-        let res = client.post(url).json(payload).send().await?;
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "npm-replication-opt-in",
+            reqwest::header::HeaderValue::from_static("true"),
+        );
+        let res = client
+            .post(url)
+            .headers(headers)
+            .json(payload)
+            .send()
+            .await?;
         let status = res.status();
         if !status.is_success() {
             let body = res.text().await.unwrap_or_default();
